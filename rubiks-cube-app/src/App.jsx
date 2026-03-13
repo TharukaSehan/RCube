@@ -95,7 +95,7 @@ export default function App() {
 
   // Otherwise, render the 3D Solve mode we already built
   return (
-    <div style={{ width: '100vw', height: '100vh', backgroundColor: '#1e1e1e', position: 'relative' }}>
+    <div style={{ width: '100vw', height: '100vh', backgroundColor: '#fcfcfc', position: 'relative' }}>
       
       {/* Top Bar for Switching Modes */}
       <div style={{ position: 'absolute', top: '20px', left: '20px', zIndex: 10 }}>
