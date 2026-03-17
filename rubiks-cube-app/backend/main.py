@@ -6,50 +6,88 @@ import base64
 import numpy as np
 import cv2
 
-# Initialize the FastAPI app
 app = FastAPI()
 
-# IMPORTANT: We must enable CORS so your React app (on port 5173) 
-# is allowed to send data to this Python app (on port 8000).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, restrict this to your frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Define the format of the data we expect from React
 class ImageData(BaseModel):
     image_base64: str
 
-# Create an endpoint to receive the webcam photo
+# --- NEW: Color Classification Function ---
+def classify_color(h, s, v):
+    """
+    Takes a Hue, Saturation, and Value and returns the Rubik's cube color.
+    Note: These ranges might need tweaking based on your specific webcam lighting!
+    """
+    # If there is very little color (low saturation) and it's fairly bright, it's White
+    if s < 60 and v > 100:
+        return "W"
+    
+    # Otherwise, we look at the Hue (0 to 179 in OpenCV) to determine the color
+    if h < 10 or h > 165:
+        return "R" # Red
+    elif 10 <= h < 25:
+        return "O" # Orange
+    elif 25 <= h < 45:
+        return "Y" # Yellow
+    elif 45 <= h < 85:
+        return "G" # Green
+    elif 85 <= h < 130:
+        return "B" # Blue
+        
+    return "Unknown"
+
 @app.post("/process-face")
 async def process_face(data: ImageData):
     try:
-        # 1. The image comes as a base64 string. We need to strip the prefix: "data:image/jpeg;base64,"
+        # 1. Decode the image
         encoded_data = data.image_base64.split(",")[1]
-        
-        # 2. Decode the string back into bytes
         nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
-        
-        # 3. Use OpenCV to convert those bytes into a readable image format (a NumPy array)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        # 2. Convert the image from BGR (OpenCV default) to HSV
+        hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         
-        # For now, let's just grab the dimensions to prove we successfully read the image!
-        height, width, channels = img.shape
+        # 3. Define the center coordinates for our 9 grid squares
+        # The image is 300x300, so each square is 100x100.
+        # The centers are at 50, 150, and 250 for both X and Y.
+        centers = [
+            (50, 50),   (150, 50),   (250, 50),   # Top row
+            (50, 150),  (150, 150),  (250, 150),  # Middle row
+            (50, 250),  (150, 250),  (250, 250)   # Bottom row
+        ]
         
-        print(f"Success! Received an image with dimensions: {width}x{height}")
-        
+        detected_colors = []
+
+        # 4. Loop through the 9 centers and extract the color
+        for (x, y) in centers:
+            # We grab a small 10x10 pixel box around the center and average it 
+            # to avoid reading a speck of dust or a scratch on the cube
+            roi = hsv_img[y-5:y+5, x-5:x+5]
+            avg_color = np.mean(roi, axis=(0, 1))
+            
+            h, s, v = avg_color
+            
+            # Figure out which Rubik's color this HSV value belongs to
+            color_name = classify_color(h, s, v)
+            detected_colors.append(color_name)
+
+        print("Detected face colors:", detected_colors)
+
         return {
             "status": "success", 
-            "message": "Image received and decoded by OpenCV!", 
-            "dimensions": f"{width}x{height}"
+            "colors": detected_colors
         }
         
     except Exception as e:
+        print("Error processing image:", e)
         return {"status": "error", "message": str(e)}
 
-# Run the server
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

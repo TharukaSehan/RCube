@@ -39,12 +39,36 @@ function Cubelet({ position }) {
 function Scanner({ onSwitchMode }) {
   const webcamRef = useRef(null);
 
-  // This function captures a picture from the video feed
-  const capture = useCallback(() => {
+ // This function captures a picture and sends it to Python
+  const capture = useCallback(async () => {
     const imageSrc = webcamRef.current.getScreenshot();
-    console.log("Captured image data:", imageSrc);
-    // Later, we will send this imageSrc to Python!
-    alert("Photo captured! Check the browser console to see the base64 image data.");
+    
+    try {
+      // 1. We send a POST request to our FastAPI server
+      const response = await fetch('http://localhost:8000/process-face', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        // We package the image string into a JSON object that matches our Python BaseModel
+        body: JSON.stringify({ image_base64: imageSrc }), 
+      });
+
+      // 2. We wait for Python to reply and read its response
+      const data = await response.json();
+      console.log("Python replied:", data);
+      
+      // 3. Show a popup with the detected colors!
+      if (data.status === "success") {
+        alert(`Success! Python read these colors: \n\n${data.colors.join(", ")}`);
+      } else {
+        alert("Python got it, but hit an error. Check the console.");
+      }
+
+    } catch (error) {
+      console.error("Connection failed:", error);
+      alert("Could not connect to Python. Is the server running on port 8000?");
+    }
   }, [webcamRef]);
 
   return (
