@@ -36,60 +36,79 @@ function Cubelet({ position }) {
 }
 
 // --- NEW: THE SCANNER COMPONENT ---
-function Scanner({ onSwitchMode }) {
+function Scanner({ onSwitchMode, onSolve }) {
   const webcamRef = useRef(null);
+  
+  // The exact order Kociemba expects
+  const faceOrder = ['Up (White)', 'Right (Red)', 'Front (Green)', 'Down (Yellow)', 'Left (Orange)', 'Back (Blue)'];
+  const [currentFaceIndex, setCurrentFaceIndex] = useState(0);
+  
+  // This array will hold all 54 colors once we are done
+  const [allColors, setAllColors] = useState([]);
 
- // This function captures a picture and sends it to Python
   const capture = useCallback(async () => {
     const imageSrc = webcamRef.current.getScreenshot();
     
     try {
-      // 1. We send a POST request to our FastAPI server
+      // 1. Send photo to Python to extract the 9 colors
       const response = await fetch('http://localhost:8000/process-face', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        // We package the image string into a JSON object that matches our Python BaseModel
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image_base64: imageSrc }), 
       });
-
-      // 2. We wait for Python to reply and read its response
       const data = await response.json();
-      console.log("Python replied:", data);
       
-      // 3. Show a popup with the detected colors!
       if (data.status === "success") {
-        alert(`Success! Python read these colors: \n\n${data.colors.join(", ")}`);
+        // 2. Add these 9 colors to our master list
+        const newColors = [...allColors, ...data.colors];
+        setAllColors(newColors);
+        
+        // 3. Check if we are done with all 6 faces
+        if (currentFaceIndex === 5) {
+          alert("All 6 faces scanned! Sending to solver...");
+          
+          // Send all 54 colors to our new /solve endpoint
+          const solveResponse = await fetch('http://localhost:8000/solve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ colors: newColors }), 
+          });
+          
+          const solveData = await solveResponse.json();
+          if (solveData.status === "success") {
+            alert(`Solution found: ${solveData.moves.join(" ")}`);
+            onSolve(solveData.moves); // Pass the moves back to the main App
+          } else {
+            alert(`Solver Error: ${solveData.message}`);
+            // Reset so they can try again
+            setAllColors([]);
+            setCurrentFaceIndex(0);
+          }
+        } else {
+          // Move to the next face prompt
+          setCurrentFaceIndex(currentFaceIndex + 1);
+        }
       } else {
-        alert("Python got it, but hit an error. Check the console.");
+        alert("Could not read colors. Try better lighting!");
       }
-
     } catch (error) {
-      console.error("Connection failed:", error);
-      alert("Could not connect to Python. Is the server running on port 8000?");
+      console.error(error);
+      alert("Connection failed. Is the Python server running?");
     }
-  }, [webcamRef]);
+  }, [webcamRef, currentFaceIndex, allColors, onSolve]);
 
   return (
     <div style={{ width: '100vw', height: '100vh', backgroundColor: '#111', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
-      <h2>Scan Your Cube</h2>
-      <p>Align the front face with the grid below.</p>
+      <h2>Scan Face: {faceOrder[currentFaceIndex]}</h2>
+      <p>Please ensure the center piece matches the color requested.</p>
       
-      {/* Container for the webcam and the overlay grid */}
       <div style={{ position: 'relative', width: '300px', height: '300px' }}>
         <Webcam
-          audio={false}
-          ref={webcamRef}
-          screenshotFormat="image/jpeg"
+          audio={false} ref={webcamRef} screenshotFormat="image/jpeg"
           videoConstraints={{ width: 300, height: 300, facingMode: "environment" }}
           style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' }}
         />
-        
-        {/* The 3x3 Targeting Grid Overlay */}
-        
         <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(3, 1fr)', gap: '4px', padding: '4px', boxSizing: 'border-box' }}>
-          {/* We render 9 empty boxes to create the grid */}
           {[...Array(9)].map((_, i) => (
             <div key={i} style={{ border: '2px solid #00ff00', borderRadius: '4px', backgroundColor: 'rgba(0, 255, 0, 0.1)' }}></div>
           ))}
@@ -97,12 +116,13 @@ function Scanner({ onSwitchMode }) {
       </div>
 
       <div style={{ marginTop: '30px', display: 'flex', gap: '15px' }}>
-        <button onClick={capture} style={btnStyle}>📸 Capture Face</button>
-        <button onClick={onSwitchMode} style={{ ...btnStyle, backgroundColor: '#555' }}>Cancel / Go to 3D</button>
+        <button onClick={capture} style={btnStyle}>📸 Capture {faceOrder[currentFaceIndex]}</button>
+        <button onClick={onSwitchMode} style={{ ...btnStyle, backgroundColor: '#555' }}>Cancel</button>
       </div>
     </div>
   );
 }
+
 
 // --- MAIN APP COMPONENT ---
 export default function App() {
@@ -113,8 +133,16 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState(0);
 
   // If the app is in 'scan' mode, render the Scanner!
+// Inside export default function App()
   if (appMode === 'scan') {
-    return <Scanner onSwitchMode={() => setAppMode('solve')} />;
+    return <Scanner 
+      onSwitchMode={() => setAppMode('solve')} 
+      onSolve={(solutionMoves) => {
+        setMoves(solutionMoves); // Save the real moves from Python!
+        setCurrentStep(0);       // Reset step counter to 0
+        setAppMode('solve');     // Switch back to 3D view
+      }}
+    />;
   }
 
   // Otherwise, render the 3D Solve mode we already built

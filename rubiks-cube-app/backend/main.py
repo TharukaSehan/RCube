@@ -5,6 +5,7 @@ import uvicorn
 import base64
 import numpy as np
 import cv2
+import kociemba
 
 app = FastAPI()
 
@@ -87,6 +88,42 @@ async def process_face(data: ImageData):
         
     except Exception as e:
         print("Error processing image:", e)
+        return {"status": "error", "message": str(e)}
+
+class CubeState(BaseModel):
+    colors: list[str] # Expects a list of 54 color strings (e.g., ["W", "W", "W", ...])
+
+@app.post("/solve")
+async def solve_cube(state: CubeState):
+    try:
+        # 1. Map our detected colors to Kociemba's required Face letters
+        # Standard layout: White=Up, Red=Right, Green=Front, Yellow=Down, Orange=Left, Blue=Back
+        color_to_face = {
+            'W': 'U', 'R': 'R', 'G': 'F', 
+            'Y': 'D', 'O': 'L', 'B': 'B',
+            'Unknown': 'U' # Fallback to prevent immediate crashes, though invalid cubes will still fail
+        }
+
+        # 2. Convert the 54 colors into a single 54-character string
+        cube_string = "".join([color_to_face[c] for c in state.colors])
+        print(f"Attempting to solve string: {cube_string}")
+
+        # 3. Feed it to the Kociemba algorithm!
+        solution = kociemba.solve(cube_string)
+        print(f"Solution found: {solution}")
+
+        # 4. The solution is a string like "R2 U' F D". We split it into a list for React.
+        moves_list = solution.split(" ")
+
+        return {
+            "status": "success",
+            "moves": moves_list
+        }
+
+    except ValueError as ve:
+        # Kociemba throws a ValueError if the cube state is physically impossible
+        return {"status": "error", "message": "Invalid cube state. Are the colors scanned correctly?"}
+    except Exception as e:
         return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
