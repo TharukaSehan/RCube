@@ -1,40 +1,110 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
-import Webcam from 'react-webcam'; // <-- NEW: Import Webcam
+import { useSpring, animated } from '@react-spring/three';
+import * as THREE from 'three';
+import Webcam from 'react-webcam';
 
-// --- 3D CUBE SETUP (Unchanged) ---
-const generateCubeletPositions = () => { /* ... (Keep your existing function) ... */ 
-  const positions = [];
-  for (let x = -1; x <= 1; x++) {
-    for (let y = -1; y <= 1; y++) {
-      for (let z = -1; z <= 1; z++) {
-        positions.push([x, y, z]);
-      }
+// --- 1. CUBE DATA ---
+const faceColors = { U: 'white', D: 'yellow', F: 'green', B: 'blue', R: 'red', L: 'orange' };
+
+// We give every cubelet a unique ID and starting position
+const initialCubelets = [];
+let idCounter = 0;
+for (let x = -1; x <= 1; x++) {
+  for (let y = -1; y <= 1; y++) {
+    for (let z = -1; z <= 1; z++) {
+      initialCubelets.push({ id: idCounter++, position: [x, y, z], rotation: [0, 0, 0] });
     }
   }
-  return positions;
-};
-const cubeletPositions = generateCubeletPositions();
+}
 
-function Cubelet({ position }) {
+// --- 2. SINGLE CUBELET COMPONENT ---
+function Cubelet({ position, rotation }) {
   const [x, y, z] = position;
-  const darkPlastic = '#222222';
-  const faceColors = [
-    x === 1 ? 'red' : darkPlastic, x === -1 ? 'orange' : darkPlastic,
-    y === 1 ? 'white' : darkPlastic, y === -1 ? 'yellow' : darkPlastic,
-    z === 1 ? 'green' : darkPlastic, z === -1 ? 'blue' : darkPlastic,
+  const dark = '#222';
+  
+  // Paint the outside faces, keep inside faces dark plastic
+  const colors = [
+    x === 1 ? faceColors.R : dark, x === -1 ? faceColors.L : dark,
+    y === 1 ? faceColors.U : dark, y === -1 ? faceColors.D : dark,
+    z === 1 ? faceColors.F : dark, z === -1 ? faceColors.B : dark,
   ];
+
   return (
-    <mesh position={position}>
+    <animated.mesh position={position} rotation={rotation}>
       <boxGeometry args={[0.95, 0.95, 0.95]} />
-      {faceColors.map((color, index) => (
-        <meshStandardMaterial key={index} attach={`material-${index}`} color={color} />
+      {colors.map((color, idx) => (
+        <meshStandardMaterial key={idx} attach={`material-${idx}`} color={color} />
       ))}
-    </mesh>
+    </animated.mesh>
   );
 }
 
+// --- 3. THE 3D CUBE ENGINE ---
+function RubiksCube({ moveQueue, currentStep, onMoveComplete }) {
+  const [cubelets, setCubelets] = useState(initialCubelets);
+  const pivotRef = useRef(new THREE.Group());
+
+  // This hook listens for when the user clicks 'Next' or 'Prev'
+  useEffect(() => {
+    if (moveQueue.length === 0 || currentStep === 0) return;
+
+    // Get the current move (e.g., "R", "U'", "F2")
+    const move = moveQueue[currentStep - 1]; 
+    const face = move[0]; // R, L, U, D, F, B
+    const isPrime = move.includes("'"); // Counter-clockwise
+    const isDouble = move.includes("2"); // 180 degrees
+
+    // 1. Identify which 9 cubelets to spin based on their current coordinates
+    const targetCubelets = cubelets.filter(c => {
+      if (face === 'R') return Math.round(c.position[0]) === 1;
+      if (face === 'L') return Math.round(c.position[0]) === -1;
+      if (face === 'U') return Math.round(c.position[1]) === 1;
+      if (face === 'D') return Math.round(c.position[1]) === -1;
+      if (face === 'F') return Math.round(c.position[2]) === 1;
+      if (face === 'B') return Math.round(c.position[2]) === -1;
+      return false;
+    });
+
+    // 2. Calculate the rotation math
+    let angle = (Math.PI / 2) * (isPrime ? 1 : -1);
+    if (isDouble) angle *= 2;
+    
+    // Determine which axis to spin the Ferris Wheel on
+    const axis = new THREE.Vector3(
+      (face === 'R' || face === 'L') ? 1 : 0,
+      (face === 'U' || face === 'D') ? 1 : 0,
+      (face === 'F' || face === 'B') ? 1 : 0
+    );
+
+    // Note: To keep this snippet clean and avoid complex 3D reparenting bugs, 
+    // we instantly apply the math rotation here. For buttery smooth animations,
+    // we would wrap this state update in a react-spring definition!
+    
+    const newCubelets = cubelets.map(c => {
+      if (targetCubelets.find(t => t.id === c.id)) {
+        // Apply the 3D rotation math to find the new coordinate
+        const vec = new THREE.Vector3(...c.position);
+        vec.applyAxisAngle(axis, angle);
+        return { ...c, position: [Math.round(vec.x), Math.round(vec.y), Math.round(vec.z)] };
+      }
+      return c;
+    });
+
+    setCubelets(newCubelets);
+    onMoveComplete();
+
+  }, [currentStep, moveQueue]);
+
+  return (
+    <group ref={pivotRef}>
+      {cubelets.map(c => <Cubelet key={c.id} position={c.position} rotation={c.rotation} />)}
+    </group>
+  );
+}
+
+// --- 4. SCANNER COMPONENT (Kept exactly as you had it!) ---
 // --- NEW: THE SCANNER COMPONENT ---
 function Scanner({ onSwitchMode, onSolve }) {
   const webcamRef = useRef(null);
@@ -123,60 +193,59 @@ function Scanner({ onSwitchMode, onSolve }) {
   );
 }
 
-
-// --- MAIN APP COMPONENT ---
+// --- 5. MAIN APP COMPONENT ---
 export default function App() {
-  // NEW: State to track if we are scanning or solving
-  const [appMode, setAppMode] = useState('solve'); // 'solve' or 'scan'
-  
-  const [moves, setMoves] = useState(["U", "R2", "F'", "D"]);
+  const [appMode, setAppMode] = useState('solve'); 
+  const [moves, setMoves] = useState([]);
   const [currentStep, setCurrentStep] = useState(0);
 
-  // If the app is in 'scan' mode, render the Scanner!
-// Inside export default function App()
   if (appMode === 'scan') {
     return <Scanner 
       onSwitchMode={() => setAppMode('solve')} 
       onSolve={(solutionMoves) => {
-        setMoves(solutionMoves); // Save the real moves from Python!
-        setCurrentStep(0);       // Reset step counter to 0
-        setAppMode('solve');     // Switch back to 3D view
+        setMoves(solutionMoves); 
+        setCurrentStep(0);       
+        setAppMode('solve');     
       }}
     />;
   }
 
-  // Otherwise, render the 3D Solve mode we already built
   return (
-    <div style={{ width: '100vw', height: '100vh', backgroundColor: '#fcfcfc', position: 'relative' }}>
+    <div style={{ width: '100vw', height: '100vh', backgroundColor: '#1e1e1e', position: 'relative' }}>
       
-      {/* Top Bar for Switching Modes */}
+      {/* Top Bar */}
       <div style={{ position: 'absolute', top: '20px', left: '20px', zIndex: 10 }}>
-        <button onClick={() => setAppMode('scan')} style={{ ...btnStyle, backgroundColor: '#2196F3' }}>
+        <button onClick={() => setAppMode('scan')} style={{ padding: '10px', backgroundColor: '#2196F3', color: 'white', borderRadius: '5px' }}>
           📷 Scan Physical Cube
         </button>
       </div>
 
-      {/* The Control Panel UI (Unchanged) */}
-      <div style={{ position: 'absolute', bottom: '40px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, backgroundColor: 'rgba(0,0,0,0.7)', padding: '20px', borderRadius: '12px', color: 'white', textAlign: 'center' }}>
-        <h2>Step: {currentStep} / {moves.length}</h2>
-        <p style={{ fontSize: '24px', fontWeight: 'bold' }}>Move: {currentStep < moves.length ? moves[currentStep] : "Solved!"}</p>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={() => setCurrentStep(Math.max(0, currentStep - 1))} disabled={currentStep === 0} style={btnStyle}>⏮️ Prev</button>
-          <button disabled={currentStep === 0 || currentStep === moves.length} style={btnStyle}>🔄 Replay</button>
-          <button onClick={() => setCurrentStep(Math.min(moves.length, currentStep + 1))} disabled={currentStep === moves.length} style={btnStyle}>Next ⏭️</button>
+      {/* Control Panel UI */}
+      {moves.length > 0 && (
+        <div style={{ position: 'absolute', bottom: '40px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, backgroundColor: 'rgba(0,0,0,0.8)', padding: '20px', borderRadius: '12px', color: 'white', textAlign: 'center' }}>
+          <h2>Step: {currentStep} / {moves.length}</h2>
+          <p style={{ fontSize: '24px', fontWeight: 'bold' }}>Move: {currentStep < moves.length ? moves[currentStep] : "Solved!"}</p>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button onClick={() => setCurrentStep(Math.max(0, currentStep - 1))} disabled={currentStep === 0}>⏮️ Prev</button>
+            <button onClick={() => setCurrentStep(Math.min(moves.length, currentStep + 1))} disabled={currentStep === moves.length}>Next ⏭️</button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* The 3D Canvas (Unchanged) */}
-      <Canvas camera={{ position: [4, 4, 6] }}>
-        <ambientLight intensity={0.6} />
+      {/* The 3D Canvas */}
+      <Canvas camera={{ position: [5, 5, 7] }}>
+        <ambientLight intensity={0.7} />
         <directionalLight position={[10, 10, 10]} intensity={1.5} />
         <directionalLight position={[-10, -10, -10]} intensity={0.5} />
-        {cubeletPositions.map((pos, index) => <Cubelet key={index} position={pos} />)}
+        
+        <RubiksCube 
+          moveQueue={moves} 
+          currentStep={currentStep} 
+          onMoveComplete={() => console.log("Move finished!")} 
+        />
+        
         <OrbitControls />
       </Canvas>
     </div>
   );
 }
-
-const btnStyle = { padding: '10px 20px', fontSize: '16px', cursor: 'pointer', border: 'none', borderRadius: '6px', backgroundColor: '#4CAF50', color: 'white', fontWeight: 'bold' };

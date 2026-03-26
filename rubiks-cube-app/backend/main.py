@@ -22,25 +22,27 @@ class ImageData(BaseModel):
 
 # --- NEW: Color Classification Function ---
 def classify_color(h, s, v):
-    """
-    Takes a Hue, Saturation, and Value and returns the Rubik's cube color.
-    Note: These ranges might need tweaking based on your specific webcam lighting!
-    """
-    # If there is very little color (low saturation) and it's fairly bright, it's White
-    if s < 60 and v > 100:
+    # 1. Black/Shadow check (If it's too dark, don't guess a color)
+    if v < 40:
+        return "Unknown"
+        
+    # 2. White check 
+    # Lowered the Saturation threshold to 40! 
+    # Your real White is ~15-30. Your Yellow is ~55-70. This fixes the overlap.
+    if s < 40 and v > 80:
         return "W"
-    
-    # Otherwise, we look at the Hue (0 to 179 in OpenCV) to determine the color
-    if h < 10 or h > 165:
-        return "R" # Red
-    elif 10 <= h < 25:
-        return "O" # Orange
-    elif 25 <= h < 45:
-        return "Y" # Yellow
-    elif 45 <= h < 85:
-        return "G" # Green
+        
+    # 3. Hue checks
+    if h < 5 or h > 165:
+        return "R"  # Red
+    elif 5 <= h < 22:
+        return "O"  # Orange
+    elif 22 <= h < 60: 
+        return "Y"  # Yellow (Expanded all the way up to 60 to catch your webcam's yellow)
+    elif 60 <= h < 85:
+        return "G"  # Green (Pushed start to 60 so it stops stealing yellow)
     elif 85 <= h < 130:
-        return "B" # Blue
+        return "B"  # Blue
         
     return "Unknown"
 
@@ -66,18 +68,19 @@ async def process_face(data: ImageData):
         
         detected_colors = []
 
-        # 4. Loop through the 9 centers and extract the color
-        for (x, y) in centers:
-            # We grab a small 10x10 pixel box around the center and average it 
-            # to avoid reading a speck of dust or a scratch on the cube
+       # 4. Loop through the 9 centers and extract the color
+        for i, (x, y) in enumerate(centers):
             roi = hsv_img[y-5:y+5, x-5:x+5]
             avg_color = np.mean(roi, axis=(0, 1))
             
-            h, s, v = avg_color
+            # Convert to integers so they are easy to read
+            h, s, v = [int(val) for val in avg_color] 
             
-            # Figure out which Rubik's color this HSV value belongs to
             color_name = classify_color(h, s, v)
             detected_colors.append(color_name)
+            
+            # THIS IS THE NEW LINE: Print the exact math for every single square!
+            print(f"Square {i+1} -> H:{h:3d}, S:{s:3d}, V:{v:3d}  => Seen as: {color_name}")
 
         print("Detected face colors:", detected_colors)
 
