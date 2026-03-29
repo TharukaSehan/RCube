@@ -31,7 +31,13 @@ def classify_color(h, s, v):
     # Your real White is ~15-30. Your Yellow is ~55-70. This fixes the overlap.
     if s < 40 and v > 80:
         return "W"
-        
+    
+    # 2.1 NEW: The "Blue-Tinted White" Cheat Code
+    # If the Hue is Blue (85-130), but the Value (brightness) is relatively low (< 160)
+    # compared to your real glowing blue stickers, assume it's a shadowed White piece.
+    if 85 <= h <= 130 and v < 160:
+        return "W"
+      
     # 3. Hue checks
     if h < 5 or h > 165:
         return "R"  # Red
