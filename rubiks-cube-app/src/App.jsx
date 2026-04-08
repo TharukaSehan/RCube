@@ -30,6 +30,59 @@ const generateInitialCube = () => {
   return cubelets;
 };
 
+const invertMove = (moveStr) => {
+  if (moveStr.includes('2')) return moveStr;
+  return moveStr.includes("'") ? moveStr.replace("'", '') : `${moveStr}'`;
+};
+
+const getInverseSequence = (moves) => {
+  return [...moves].reverse().map(invertMove);
+};
+
+const applyMoveToCubeState = (cubeState, moveStr, inverse = false) => {
+  const face = moveStr[0];
+  const isPrime = moveStr.includes("'");
+  const isDouble = moveStr.includes('2');
+
+  let angle = -Math.PI / 2;
+  if (face === 'L' || face === 'D' || face === 'B') angle = Math.PI / 2;
+
+  let finalAngle = angle;
+  if (isPrime) finalAngle *= -1;
+  if (isDouble) finalAngle *= 2;
+  if (inverse) finalAngle *= -1;
+
+  const axis = new THREE.Vector3();
+  if (face === 'R' || face === 'L') axis.set(1, 0, 0);
+  if (face === 'U' || face === 'D') axis.set(0, 1, 0);
+  if (face === 'F' || face === 'B') axis.set(0, 0, 1);
+
+  const rotMatrix = new THREE.Matrix4().makeRotationAxis(axis, finalAngle);
+
+  return cubeState.map((c) => {
+    const pos = new THREE.Vector3().setFromMatrixPosition(c.matrix);
+    let isOnFace = false;
+    const eps = 0.1;
+    if (face === 'R' && pos.x > 1 - eps) isOnFace = true;
+    if (face === 'L' && pos.x < -1 + eps) isOnFace = true;
+    if (face === 'U' && pos.y > 1 - eps) isOnFace = true;
+    if (face === 'D' && pos.y < -1 + eps) isOnFace = true;
+    if (face === 'F' && pos.z > 1 - eps) isOnFace = true;
+    if (face === 'B' && pos.z < -1 + eps) isOnFace = true;
+
+    if (isOnFace) {
+      const newMatrix = new THREE.Matrix4().multiplyMatrices(rotMatrix, c.matrix);
+      const newPos = new THREE.Vector3().setFromMatrixPosition(newMatrix);
+      newPos.x = Math.round(newPos.x);
+      newPos.y = Math.round(newPos.y);
+      newPos.z = Math.round(newPos.z);
+      newMatrix.setPosition(newPos);
+      return { ...c, matrix: newMatrix };
+    }
+    return c;
+  });
+};
+
 function Cubelet({ matrix, colors }) {
   const meshRef = useRef();
 
@@ -208,49 +261,7 @@ export default function App() {
   const [cubeState, setCubeState] = useState(generateInitialCube);
 
   const applyMove = useCallback((moveStr, inverse = false) => {
-    setCubeState((prevCube) => {
-      const face = moveStr[0];
-      const isPrime = moveStr.includes("'");
-      const isDouble = moveStr.includes("2");
-
-      let angle = -Math.PI / 2;
-      if (face === 'L' || face === 'D' || face === 'B') angle = Math.PI / 2;
-      
-      let finalAngle = angle;
-      if (isPrime) finalAngle *= -1;
-      if (isDouble) finalAngle *= 2;
-      if (inverse) finalAngle *= -1;
-
-      const axis = new THREE.Vector3();
-      if (face === 'R' || face === 'L') axis.set(1, 0, 0);
-      if (face === 'U' || face === 'D') axis.set(0, 1, 0);
-      if (face === 'F' || face === 'B') axis.set(0, 0, 1);
-
-      const rotMatrix = new THREE.Matrix4().makeRotationAxis(axis, finalAngle);
-
-      return prevCube.map(c => {
-        const pos = new THREE.Vector3().setFromMatrixPosition(c.matrix);
-        let isOnFace = false;
-        const eps = 0.1;
-        if (face === 'R' && pos.x > 1 - eps) isOnFace = true;
-        if (face === 'L' && pos.x < -1 + eps) isOnFace = true;
-        if (face === 'U' && pos.y > 1 - eps) isOnFace = true;
-        if (face === 'D' && pos.y < -1 + eps) isOnFace = true;
-        if (face === 'F' && pos.z > 1 - eps) isOnFace = true;
-        if (face === 'B' && pos.z < -1 + eps) isOnFace = true;
-
-        if (isOnFace) {
-          const newMatrix = new THREE.Matrix4().multiplyMatrices(rotMatrix, c.matrix);
-          const newPos = new THREE.Vector3().setFromMatrixPosition(newMatrix);
-          newPos.x = Math.round(newPos.x);
-          newPos.y = Math.round(newPos.y);
-          newPos.z = Math.round(newPos.z);
-          newMatrix.setPosition(newPos);
-          return { ...c, matrix: newMatrix };
-        }
-        return c;
-      });
-    });
+    setCubeState((prevCube) => applyMoveToCubeState(prevCube, moveStr, inverse));
   }, []);
 
   const handleNext = () => {
@@ -267,14 +278,19 @@ export default function App() {
   };
 
   const handleSolveStart = (solutionMoves) => {
-    setMoves(solutionMoves); 
-    setCurrentStep(0); 
-    setCubeState(generateInitialCube()); 
-    setAppMode('solve');     
+    const initialScrambledCube = getInverseSequence(solutionMoves).reduce(
+      (cube, move) => applyMoveToCubeState(cube, move),
+      generateInitialCube()
+    );
+
+    setMoves(solutionMoves);
+    setCurrentStep(0);
+    setCubeState(initialScrambledCube);
+    setAppMode('solve');
   };
 
   if (appMode === 'scan') {
-    return <Scanner onCancel={() => setAppMode('solve')} onFinish={handleSolveStart} />;
+    return <Scanner onSwitchMode={() => setAppMode('solve')} onSolve={handleSolveStart} />;
   }
   
   if (appMode === 'manual') {
