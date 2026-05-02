@@ -4,6 +4,9 @@ import { OrbitControls } from '@react-three/drei';
 import Webcam from 'react-webcam';
 import * as THREE from 'three'; 
 
+// Backend URL: set `VITE_BACKEND_URL` in Vite / Vercel (falls back to localhost for dev)
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+
 // --- SHARED STYLES ---
 const btnStyle = { padding: '10px 20px', fontSize: '16px', cursor: 'pointer', border: 'none', borderRadius: '6px', backgroundColor: '#4CAF50', color: 'white', fontWeight: 'bold' };
 
@@ -115,7 +118,7 @@ function Scanner({ onSwitchMode, onSolve }) {
     const imageSrc = webcamRef.current.getScreenshot();
     
     try {
-      const response = await fetch('http://localhost:8000/process-face', {
+      const response = await fetch(`${BACKEND_URL}/process-face`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image_base64: imageSrc }), 
@@ -129,7 +132,7 @@ function Scanner({ onSwitchMode, onSolve }) {
         if (currentFaceIndex === 5) {
           alert("All 6 faces scanned! Sending to solver...");
           
-          const solveResponse = await fetch('http://localhost:8000/solve', {
+          const solveResponse = await fetch(`${BACKEND_URL}/solve`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ colors: newColors }), 
@@ -203,7 +206,7 @@ function ManualInput({ onCancel, onFinish }) {
       setFaceIdx(faceIdx + 1);
     } else {
       try {
-        const response = await fetch('http://localhost:8000/solve', {
+        const response = await fetch(`${BACKEND_URL}/solve`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ colors: cubeColors }),

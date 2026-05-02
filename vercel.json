@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "installCommand": "cd rubiks-cube-app && npm install",
+  "buildCommand": "cd rubiks-cube-app && npm run build",
+  "outputDirectory": "rubiks-cube-app/dist",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
